@@ -2,8 +2,76 @@ from torchvision.models import resnet18, ResNet18_Weights  # type:ignore
 from torch.nn.functional import cross_entropy
 from torch.nn import Linear
 from torch.optim import Adam
-from pytorch_lightning import LightningModule
+from pytorch_lightning import LightningModule, LightningDataModule
 import torch
+from PIL import Image
+from torchvision import datasets, transforms
+import polars as pl
+from sklearn.model_selection import train_test_split
+from torch.utils.data import Subset
+from torch.utils.data import DataLoader
+import numpy as np
+
+
+def image_val(path):
+    try:
+        image = Image.open(path)
+        image = image.resize((225, 225))
+        return True
+    except:
+        return False
+
+
+class MushroomDataModule(LightningDataModule):
+    def __init__(self, batch_size=128):
+        super().__init__()
+        self.batch_size = batch_size
+        self.transform = transforms.Compose(
+            [
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+            ]
+        )
+
+        def setup(self, stage=None):
+            dataset = datasets.ImageFolder(
+                root="Mushrooms",
+                transform=self.transform,
+                is_valid_file=image_val,
+            )
+            path_df = pl.DataFrame(dataset.samples, schema=["img", "class"])
+            path_df = path_df.with_columns(
+                pl.Series(np.arange(len(path_df))).alias("id")
+            )
+            # Getting a list of data point indexes for a stratified split
+            path_df = pl.DataFrame(dataset.samples, schema=["img", "class"])
+            train_idx, valid_test_idx = train_test_split(
+                path_df, stratify=path_df["class"], test_size=0.4
+            )
+            train_idx = train_idx["id"].to_list()
+            valid_idx, test_idx = train_test_split(
+                valid_test_idx, stratify=valid_test_idx["class"], test_size=0.5
+            )
+            valid_idx = valid_idx["id"].to_list()
+            test_idx = test_idx["id"].to_list()
+            # Subsets based on index
+            self.train_set = Subset(dataset, train_idx)
+            self.valid_set = Subset(dataset, valid_idx)
+            self.test_set = Subset(dataset, test_idx)
+
+        def train_dataloader(self):
+            return DataLoader(self.train_set, batch_size=self.batch_size, num_workers=5)
+
+        def val_dataloader(self):
+            return DataLoader(
+                self.valid_set,
+                batch_size=self.batch_size,
+                num_workers=5,
+            )
+
+        def test_dataloader(self):
+            return DataLoader(self.test_set, batch_size=self.batch_size, num_workers=5)
 
 
 class MushroomClassifier(LightningModule):

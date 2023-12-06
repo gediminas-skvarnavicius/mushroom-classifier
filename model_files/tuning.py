@@ -1,37 +1,11 @@
+from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-from pytorch_lightning import LightningModule
-from typing import Type
-
-
-def objective(
-    pipeline: Type[LightningModule],
-    params: dict,
-    train: DataLoader,
-    val: DataLoader,
-    n: int,
-    metric: str = "val_loss",
-) -> float:
-    """
-    Objective function for hyperparameter tuning.
-
-    Parameters:
-    - pipeline (Pipeline): The machine learning pipeline to be evaluated.
-    - params (dict): Hyperparameter configuration for the pipeline.
-    - X_train (pl.DataFrame): Training data features as a Polars DataFrame.
-    - y_train (pl.Series): Training data labels as a Polars Series.
-    - X_val (pl.DataFrame): Validation data features as a Polars DataFrame.
-    - y_val (pl.Series): Validation data labels as a Polars Series.
-    - n (int): The current iteration number.
-    - metric (str, optional): The metric for scoring. Supported metrics:
-    "roc_auc", "f1", "rmse".
-
-    Returns:
-    - float: The score based on the specified metric.
-    """
-    pipeline.set_params(**params)
-    pipeline.fit(X_train, y_train)
-    results = trainer.test(model, dataloaders=val_loader)
-    return results[-1][metric]
+from pytorch_lightning import LightningModule, Trainer
+from pytorch_lightning.loggers import Logger
+from typing import Type, Optional, List
+import numpy as np
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from ray import tune
 
 
 class TrainableCV(tune.Trainable):
@@ -65,13 +39,12 @@ class TrainableCV(tune.Trainable):
     def setup(
         self,
         config: dict,
-        pipeline: Pipeline,
-        X_train: pl.DataFrame,
-        y_train: pl.Series,
-        sample_size: Optional[int] = None,
-        metric: str = "roc_auc",
-        stratify: bool = True,
-        n_splits: int = 5,
+        model: Type[LightningModule],
+        train: Type[Dataset],
+        val: Type[Dataset],
+        metric: str = "val_loss",
+        logger: Optional[Logger] = None,
+        callbacks: Optional[List[EarlyStopping]] = None,
     ):
         """
         Set up the trainable object with hyperparameters and data.
@@ -90,36 +63,57 @@ class TrainableCV(tune.Trainable):
         stratify (bool, optional): Whether to stratify data splitting.
         Default is True.
         """
+
         self.x = 0
-        self.params = config
-        self.pipeline = pipeline
-        self.X_train = X_train
-        self.y_train = y_train
-        self.sample_size = sample_size
+        self.config = config
+        self.model = model(
+            num_classes=config["num_classes"],
+            learning_rate=config["learning_rate"],
+        )
+        self.train_loader: DataLoader = DataLoader(
+            train, batch_size=config["batch_size"], shuffle=True, num_workers=5
+        )
+        self.val_loader: DataLoader = DataLoader(
+            val, batch_size=["batch_size"], shuffle=False, num_workers=5
+        )
         self.metric = metric
         self.scores = np.array([])
 
-        if stratify:
-            self.splitter = StratifiedKFold(n_splits)
-        else:
-            self.splitter = KFold(n_splits)
+        self.trainer = Trainer(
+            max_epochs=config["max_epochs"],
+            accelerator="gpu",
+            callbacks=callbacks,
+            logger=logger,
+        )
 
-        self.fold_indices = []
-        if not sample_size:
-            for train_index, test_index in self.splitter.split(
-                X_train,
-                y_train,
-            ):
-                self.fold_indices.append((train_index, test_index))
-        else:
-            for train_index, test_index in self.splitter.split(
-                X_train.sample(sample_size, seed=1),
-                y_train.sample(
-                    sample_size,
-                    seed=1,
-                ),
-            ):
-                self.fold_indices.append((train_index, test_index))
+    def objective(
+        trainer: Trainer,
+        model: Type[LightningModule],
+        train_loader: DataLoader,
+        val_loader: DataLoader,
+        metric: str = "val_loss",
+    ) -> float:
+        """
+        Objective function for hyperparameter tuning.
+
+        Parameters:
+        - pipeline (Pipeline): The machine learning pipeline to be evaluated.
+        - params (dict): Hyperparameter configuration for the pipeline.
+        - X_train (pl.DataFrame): Training data features as a Polars DataFrame.
+        - y_train (pl.Series): Training data labels as a Polars Series.
+        - X_val (pl.DataFrame): Validation data features as a Polars DataFrame.
+        - y_val (pl.Series): Validation data labels as a Polars Series.
+        - n (int): The current iteration number.
+        - metric (str, optional): The metric for scoring. Supported metrics:
+        "roc_auc", "f1", "rmse".
+
+        Returns:
+        - float: The score based on the specified metric.
+        """
+
+        trainer.fit(model, train_loader, val_loader)
+        results = trainer.test(model, val_loader)
+        return results[-1][metric]
 
     def step(self):
         """
@@ -128,19 +122,12 @@ class TrainableCV(tune.Trainable):
         Returns:
         dict: A dictionary containing the score for the current step.
         """
-        try:
-            score = objective(
-                self.pipeline,
-                self.params,
-                self.X_train[self.fold_indices[self.x][0]],
-                self.y_train[self.fold_indices[self.x][0]],
-                self.X_train[self.fold_indices[self.x][1]],
-                self.y_train[self.fold_indices[self.x][1]],
-                self.x,
-                self.metric,
-            )
-            self.scores = np.append(self.scores, score)
-            self.x += 1
-        except:
-            print(f"cross val {self.x} False")
+        score = self.objective(
+            model=self.model,
+            trainer=self.trainer,
+            train_loader=self.train_loader,
+            val_loader=self.val_loader,
+            metric=self.metric,
+        )
+        self.scores = np.append(self.scores, score)
         return {"score": self.scores.mean()}
