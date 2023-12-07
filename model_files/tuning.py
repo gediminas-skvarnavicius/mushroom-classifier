@@ -1,11 +1,12 @@
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-from pytorch_lightning import LightningModule, Trainer
+from pytorch_lightning import LightningModule, Trainer, LightningDataModule
 from pytorch_lightning.loggers import Logger
 from typing import Type, Optional, List
 import numpy as np
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from ray import tune
+import ray
 
 
 class TrainableCV(tune.Trainable):
@@ -40,8 +41,7 @@ class TrainableCV(tune.Trainable):
         self,
         config: dict,
         model: Type[LightningModule],
-        train: Type[Dataset],
-        val: Type[Dataset],
+        dm: Type[LightningDataModule],
         metric: str = "val_loss",
         logger: Optional[Logger] = None,
         callbacks: Optional[List[EarlyStopping]] = None,
@@ -70,15 +70,9 @@ class TrainableCV(tune.Trainable):
             num_classes=config["num_classes"],
             learning_rate=config["learning_rate"],
         )
-        self.train_loader: DataLoader = DataLoader(
-            train, batch_size=config["batch_size"], shuffle=True, num_workers=5
-        )
-        self.val_loader: DataLoader = DataLoader(
-            val, batch_size=["batch_size"], shuffle=False, num_workers=5
-        )
+        self.dm = dm(batch_size=config["batch_size"])
         self.metric = metric
         self.scores = np.array([])
-
         self.trainer = Trainer(
             max_epochs=config["max_epochs"],
             accelerator="gpu",
@@ -86,11 +80,11 @@ class TrainableCV(tune.Trainable):
             logger=logger,
         )
 
+    @staticmethod
     def objective(
         trainer: Trainer,
         model: Type[LightningModule],
-        train_loader: DataLoader,
-        val_loader: DataLoader,
+        dm: Type[LightningDataModule],
         metric: str = "val_loss",
     ) -> float:
         """
@@ -111,9 +105,8 @@ class TrainableCV(tune.Trainable):
         - float: The score based on the specified metric.
         """
 
-        trainer.fit(model, train_loader, val_loader)
-        results = trainer.test(model, val_loader)
-        return results[-1][metric]
+        trainer.fit(model, datamodule=dm)
+        return trainer.callback_metrics[metric].item()
 
     def step(self):
         """
@@ -125,8 +118,7 @@ class TrainableCV(tune.Trainable):
         score = self.objective(
             model=self.model,
             trainer=self.trainer,
-            train_loader=self.train_loader,
-            val_loader=self.val_loader,
+            dm=self.dm,
             metric=self.metric,
         )
         self.scores = np.append(self.scores, score)

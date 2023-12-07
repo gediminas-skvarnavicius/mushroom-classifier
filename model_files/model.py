@@ -34,55 +34,52 @@ class MushroomDataModule(LightningDataModule):
             ]
         )
 
-        def setup(self, stage=None):
-            dataset = datasets.ImageFolder(
-                root="Mushrooms",
-                transform=self.transform,
-                is_valid_file=image_val,
-            )
-            path_df = pl.DataFrame(dataset.samples, schema=["img", "class"])
-            path_df = path_df.with_columns(
-                pl.Series(np.arange(len(path_df))).alias("id")
-            )
-            # Getting a list of data point indexes for a stratified split
-            path_df = pl.DataFrame(dataset.samples, schema=["img", "class"])
-            train_idx, valid_test_idx = train_test_split(
-                path_df, stratify=path_df["class"], test_size=0.4
-            )
-            train_idx = train_idx["id"].to_list()
-            valid_idx, test_idx = train_test_split(
-                valid_test_idx, stratify=valid_test_idx["class"], test_size=0.5
-            )
-            valid_idx = valid_idx["id"].to_list()
-            test_idx = test_idx["id"].to_list()
-            # Subsets based on index
-            self.train_set = Subset(dataset, train_idx)
-            self.valid_set = Subset(dataset, valid_idx)
-            self.test_set = Subset(dataset, test_idx)
+    def setup(self, stage=None):
+        dataset = datasets.ImageFolder(
+            root="/home/gediminas/Documents/turing_projects/module4_s1/gskvar-DL.1.5/Mushrooms",
+            transform=self.transform,
+            is_valid_file=image_val,
+        )
+        path_df = pl.DataFrame(dataset.samples, schema=["img", "class"])
+        path_df = path_df.with_columns(pl.Series(np.arange(len(path_df))).alias("id"))
+        # Getting a list of data point indexes for a stratified split
+        train_idx, valid_test_idx = train_test_split(
+            path_df, stratify=path_df["class"], test_size=0.4
+        )
+        train_idx = train_idx["id"].to_list()
+        valid_idx, test_idx = train_test_split(
+            valid_test_idx, stratify=valid_test_idx["class"], test_size=0.5
+        )
+        valid_idx = valid_idx["id"].to_list()
+        test_idx = test_idx["id"].to_list()
+        # Subsets based on index
+        self.train_set = Subset(dataset, train_idx)
+        self.valid_set = Subset(dataset, valid_idx)
+        self.test_set = Subset(dataset, test_idx)
 
-        def train_dataloader(self):
-            return DataLoader(self.train_set, batch_size=self.batch_size, num_workers=5)
+    def train_dataloader(self):
+        return DataLoader(self.train_set, batch_size=self.batch_size, num_workers=5)
 
-        def val_dataloader(self):
-            return DataLoader(
-                self.valid_set,
-                batch_size=self.batch_size,
-                num_workers=5,
-            )
+    def val_dataloader(self):
+        return DataLoader(
+            self.valid_set,
+            batch_size=self.batch_size,
+            num_workers=5,
+        )
 
-        def test_dataloader(self):
-            return DataLoader(self.test_set, batch_size=self.batch_size, num_workers=5)
+    def test_dataloader(self):
+        return DataLoader(self.test_set, batch_size=self.batch_size, num_workers=5)
 
 
 class MushroomClassifier(LightningModule):
-    def __init__(self, num_classes, learning_rate=1e-3):
-        super(MushroomClassifier, self).__init__()
+    def __init__(self, num_classes=9, learning_rate=1e-3):
+        super().__init__()
 
         # Load pre-trained ResNet-18
         self.model = resnet18(weights=ResNet18_Weights.DEFAULT)
         # Modify the classifier to match the number of classes in your dataset
         in_features = self.model.fc.in_features
-        self.model.fc = Linear(in_features, num_classes)
+        self.model.fc = Linear(in_features, 9)
         # Set other hyperparameters
         self.learning_rate = learning_rate
 
