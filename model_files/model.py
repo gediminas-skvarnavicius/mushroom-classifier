@@ -1,7 +1,14 @@
-from torchvision.models import resnet18, ResNet18_Weights  # type:ignore
+from torchvision.models import (
+    resnet18,
+    ResNet18_Weights,
+    squeezenet1_0,
+    SqueezeNet1_0_Weights,
+    googlenet,
+    GoogLeNet_Weights,
+)  # type:ignore
 from torch.nn.functional import cross_entropy
 from torch.nn import Linear
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 from pytorch_lightning import LightningModule, LightningDataModule
 import torch
 from PIL import Image
@@ -44,11 +51,14 @@ class MushroomDataModule(LightningDataModule):
         path_df = path_df.with_columns(pl.Series(np.arange(len(path_df))).alias("id"))
         # Getting a list of data point indexes for a stratified split
         train_idx, valid_test_idx = train_test_split(
-            path_df, stratify=path_df["class"], test_size=0.4
+            path_df, stratify=path_df["class"], test_size=0.4, random_state=1
         )
         train_idx = train_idx["id"].to_list()
         valid_idx, test_idx = train_test_split(
-            valid_test_idx, stratify=valid_test_idx["class"], test_size=0.5
+            valid_test_idx,
+            stratify=valid_test_idx["class"],
+            test_size=0.5,
+            random_state=1,
         )
         valid_idx = valid_idx["id"].to_list()
         test_idx = test_idx["id"].to_list()
@@ -72,14 +82,31 @@ class MushroomDataModule(LightningDataModule):
 
 
 class MushroomClassifier(LightningModule):
-    def __init__(self, num_classes=9, learning_rate=1e-3):
+    def __init__(
+        self,
+        num_classes=9,
+        learning_rate=1e-3,
+        architecture="resnet18",
+        optimizer="adam",
+        l2=0,
+    ):
         super().__init__()
 
-        # Load pre-trained ResNet-18
-        self.model = resnet18(weights=ResNet18_Weights.DEFAULT)
+        # Load pre-trained architecture
+        models = {
+            "resnet18": resnet18(weights=ResNet18_Weights.DEFAULT),
+            "squeezenet": squeezenet1_0(weights=SqueezeNet1_0_Weights.DEFAULT),
+            "google": googlenet(weights=GoogLeNet_Weights.DEFAULT),
+        }
+        self.model = models[architecture]
+        self.optimizer = optimizer
+        self.l2 = l2
         # Modify the classifier to match the number of classes in your dataset
-        in_features = self.model.fc.in_features
-        self.model.fc = Linear(in_features, 9)
+        if architecture == "squeezenet":
+            in_features = self.model.classifier[1].in_channels
+        else:
+            in_features = self.model.fc.in_features
+        self.model.fc = Linear(in_features, num_classes)
         # Set other hyperparameters
         self.learning_rate = learning_rate
 
@@ -110,7 +137,19 @@ class MushroomClassifier(LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = Adam(self.parameters(), lr=self.learning_rate)
+        optimizers = {
+            "adam": Adam(
+                self.parameters(),
+                lr=self.learning_rate,
+                weight_decay=self.l2,
+            ),
+            "sgd": SGD(
+                self.parameters(),
+                lr=self.learning_rate,
+                weight_decay=self.l2,
+            ),
+        }
+        optimizer = optimizers[self.optimizer]
         return optimizer
 
     def test_step(self, batch, batch_idx):

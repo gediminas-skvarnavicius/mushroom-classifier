@@ -69,6 +69,9 @@ class TrainableCV(tune.Trainable):
         self.model = model(
             num_classes=config["num_classes"],
             learning_rate=config["learning_rate"],
+            architecture=config["architecture"],
+            optimizer=config["optimizer"],
+            l2=config["l2"],
         )
         self.dm = dm(batch_size=config["batch_size"])
         self.metric = metric
