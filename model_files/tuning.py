@@ -9,6 +9,22 @@ from ray import tune
 import ray
 
 
+def config_models(
+    config,
+    model: Type[LightningModule],
+    dm: Type[LightningDataModule],
+):
+    model = model(
+        num_classes=config["num_classes"],
+        learning_rate=config["learning_rate"],
+        architecture=config["architecture"],
+        optimizer=config["optimizer"],
+        l2=config["l2"],
+    )
+    dm = dm(batch_size=config["batch_size"])
+    return model, dm
+
+
 class TrainableCV(tune.Trainable):
     """
     A custom Ray Tune trainable class for hyperparameter tuning.
