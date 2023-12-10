@@ -1,12 +1,9 @@
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
 from pytorch_lightning import LightningModule, Trainer, LightningDataModule
 from pytorch_lightning.loggers import Logger
 from typing import Type, Optional, List
 import numpy as np
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from ray import tune
-import ray
 
 
 def config_models(
@@ -89,7 +86,10 @@ class TrainableCV(tune.Trainable):
             optimizer=config["optimizer"],
             l2=config["l2"],
         )
-        self.dm = dm(batch_size=config["batch_size"])
+        self.dm = dm(
+            batch_size=config["batch_size"],
+            img_size=config["img_size"],
+        )
         self.metric = metric
         self.scores = np.array([])
         self.trainer = Trainer(

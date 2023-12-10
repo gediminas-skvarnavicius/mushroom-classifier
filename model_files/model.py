@@ -20,22 +20,23 @@ from torch.utils.data import DataLoader
 import numpy as np
 
 
-def image_val(path):
+def image_val(path, img_size=225):
     try:
         image = Image.open(path)
-        image = image.resize((225, 225))
+        image = image.resize((img_size, img_size))
         return True
     except:
         return False
 
 
 class MushroomDataModule(LightningDataModule):
-    def __init__(self, batch_size=128):
+    def __init__(self, batch_size=128, img_size=224):
         super().__init__()
+        self.img_size = img_size
         self.batch_size = batch_size
         self.transform = transforms.Compose(
             [
-                transforms.Resize((224, 224)),
+                transforms.Resize((img_size, img_size)),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
             ]
@@ -45,7 +46,7 @@ class MushroomDataModule(LightningDataModule):
         dataset = datasets.ImageFolder(
             root="/home/gediminas/Documents/turing_projects/module4_s1/gskvar-DL.1.5/Mushrooms",
             transform=self.transform,
-            is_valid_file=image_val,
+            is_valid_file=lambda path: image_val(path=path, img_size=self.img_size),
         )
         path_df = pl.DataFrame(dataset.samples, schema=["img", "class"])
         path_df = path_df.with_columns(pl.Series(np.arange(len(path_df))).alias("id"))
