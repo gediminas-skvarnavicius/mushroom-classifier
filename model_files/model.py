@@ -18,6 +18,7 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import Subset
 from torch.utils.data import DataLoader
 import numpy as np
+from torcheval.metrics.functional import multiclass_f1_score
 
 
 def image_val(path, img_size=225):
@@ -46,7 +47,10 @@ class MushroomDataModule(LightningDataModule):
         dataset = datasets.ImageFolder(
             root="/home/gediminas/Documents/turing_projects/module4_s1/gskvar-DL.1.5/Mushrooms",
             transform=self.transform,
-            is_valid_file=lambda path: image_val(path=path, img_size=self.img_size),
+            is_valid_file=lambda path: image_val(
+                path=path,
+                img_size=self.img_size,
+            ),
         )
         path_df = pl.DataFrame(dataset.samples, schema=["img", "class"])
         path_df = path_df.with_columns(pl.Series(np.arange(len(path_df))).alias("id"))
@@ -69,7 +73,11 @@ class MushroomDataModule(LightningDataModule):
         self.test_set = Subset(dataset, test_idx)
 
     def train_dataloader(self):
-        return DataLoader(self.train_set, batch_size=self.batch_size, num_workers=5)
+        return DataLoader(
+            self.train_set,
+            batch_size=self.batch_size,
+            num_workers=5,
+        )
 
     def val_dataloader(self):
         return DataLoader(
@@ -79,7 +87,11 @@ class MushroomDataModule(LightningDataModule):
         )
 
     def test_dataloader(self):
-        return DataLoader(self.test_set, batch_size=self.batch_size, num_workers=5)
+        return DataLoader(
+            self.test_set,
+            batch_size=self.batch_size,
+            num_workers=5,
+        )
 
 
 class MushroomClassifier(LightningModule):
@@ -101,6 +113,7 @@ class MushroomClassifier(LightningModule):
         }
         self.model = models[architecture]
         self.optimizer = optimizer
+        self.num_classes = num_classes
         self.l2 = l2
         # Modify the classifier to match the number of classes in your dataset
         if architecture == "squeezenet":
@@ -157,10 +170,20 @@ class MushroomClassifier(LightningModule):
         inputs, labels = batch
         outputs = self(inputs)
         loss = cross_entropy(outputs, labels)
-
+        f1 = multiclass_f1_score(
+            labels,
+            torch.argmax(outputs, dim=1),
+            average="weighted",
+            num_classes=9,
+        )
         # Log any additional metrics you are interested in
         acc = (torch.argmax(outputs, dim=1) == labels).float().mean()
+
         self.log("test_loss", loss)
         self.log("test_accuracy", acc, prog_bar=True)
-
+        self.log("test_weighted_f1_score", f1)
         return loss
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        inputs, labels = batch
+        return self(inputs)

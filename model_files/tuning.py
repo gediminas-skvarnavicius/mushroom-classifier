@@ -18,7 +18,7 @@ def config_models(
         optimizer=config["optimizer"],
         l2=config["l2"],
     )
-    dm = dm(batch_size=config["batch_size"])
+    dm = dm(batch_size=config["batch_size"], img_size=config["img_size"])
     return model, dm
 
 
