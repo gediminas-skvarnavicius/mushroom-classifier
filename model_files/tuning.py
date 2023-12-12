@@ -1,30 +1,45 @@
 from pytorch_lightning import LightningModule, Trainer, LightningDataModule
 from pytorch_lightning.loggers import Logger
-from typing import Type, Optional, List
+from typing import Type, Optional, List, Tuple
 import numpy as np
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from ray import tune
+from .model import MushroomClassifier, MushroomDataModule
 
 
 def config_models(
-    config,
-    model: Type[LightningModule],
-    dm: Type[LightningDataModule],
-):
-    model = model(
+    config: dict,
+    model: Type[MushroomDataModule],
+    dm: Type[MushroomClassifier],
+) -> Tuple[MushroomDataModule, MushroomClassifier]:
+    """
+    Configure and initialize a model and data module based on the provided
+    configuration.
+
+    Parameters:
+    - config (dict): A dictionary containing configuration parameters.
+    - model (Type[MushroomDataModule]): The class type for the model.
+    - dm (Type[MushroomClassifier]): The class type for the data module.
+
+    Returns:
+    Tuple[MushroomDataModule, MushroomClassifier]: A tuple containing the
+    initialized model and data module.
+    """
+    model_instance = model(
         num_classes=config["num_classes"],
         learning_rate=config["learning_rate"],
         architecture=config["architecture"],
         optimizer=config["optimizer"],
         l2=config["l2"],
     )
-    dm = dm(batch_size=config["batch_size"], img_size=config["img_size"])
-    return model, dm
+    dm_instance = dm(batch_size=config["batch_size"], img_size=config["img_size"])
+    return model_instance, dm_instance
 
 
-class TrainableCV(tune.Trainable):
+class TrainableP2L(tune.Trainable):
     """
-    A custom Ray Tune trainable class for hyperparameter tuning.
+    A custom Ray Tune trainable class for hyperparameter tuning of
+    PyTorch Lightning models.
 
     This class is used to configure and execute hyperparameter
     tuning experiments using Ray Tune. It sets up the necessary
@@ -32,17 +47,16 @@ class TrainableCV(tune.Trainable):
     evaluate the hyperparameter configurations.
 
     Attributes:
-    - config (dict): A dictionary of hyperparameters for the pipeline.
-    - pipeline: The machine learning pipeline to be configured and evaluated.
-    - X_train: Training data features.
-    - y_train: Training data labels.
-    - sample_size (Union[int, str]): The sample size for data splitting.
-    - metric (str): The metric used.
-    - stratify (bool): Whether to stratify data splitting.
+    - config (dict): A dictionary of hyperparameters for the model.
+    - model: The PyTorch Lightning model to be configured and evaluated.
+    - dm: The PyTorch Lightning DataModule for handling data.
+    - metric (str): The metric used for evaluation.
+    - logger (Optional[Logger]): An optional logger for experiment logging.
+    - callbacks (Optional[List[EarlyStopping]]): Optional list of early
+    stopping callbacks.
 
     Methods:
-    - setup(config, pipeline, X_train, y_train, X_val, y_val, sample_size,
-    metric, stratify):
+    - setup(config, model, dm, metric, logger, callbacks):
         Set up the trainable object with hyperparameters and data.
 
     - step():
@@ -64,17 +78,12 @@ class TrainableCV(tune.Trainable):
 
         Args:
         config (dict): A dictionary of hyperparameters.
-        pipeline: The machine learning pipeline.
-        X_train: Training data features.
-        y_train: Training data labels.
-        sample_size (Union[int, str], optional): The sample size for data
-        splitting.
-        n_splits: The number of splits for cross-validation.
-
+        model: The PyTorch Lightning model.
+        dm: The PyTorch Lightning DataModule.
         metric (str, optional): The metric used for scoring.
 
-        stratify (bool, optional): Whether to stratify data splitting.
-        Default is True.
+        logger (Optional[Logger], optional): An optional logger for experiment logging.
+        callbacks (Optional[List[EarlyStopping]], optional): Optional list of early stopping callbacks.
         """
 
         self.x = 0

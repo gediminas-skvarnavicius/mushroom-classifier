@@ -1,37 +1,65 @@
-from torchvision.models import (
+from torchvision.models import (  # type: ignore
     resnet18,
     ResNet18_Weights,
     squeezenet1_0,
     SqueezeNet1_0_Weights,
     googlenet,
     GoogLeNet_Weights,
-)  # type:ignore
+)  # type: ignore
 from torch.nn.functional import cross_entropy
 from torch.nn import Linear
 from torch.optim import Adam, SGD
 from pytorch_lightning import LightningModule, LightningDataModule
 import torch
-from PIL import Image
-from torchvision import datasets, transforms
+from PIL import Image  # type: ignore
+from torchvision import datasets, transforms  # type: ignore
 import polars as pl
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split  # type: ignore
 from torch.utils.data import Subset
 from torch.utils.data import DataLoader
 import numpy as np
 from torcheval.metrics.functional import multiclass_f1_score
+import os
+from typing import Optional, Tuple
 
 
-def image_val(path, img_size=225):
+def image_val(path: str, img_size: int = 225) -> bool:
+    """
+    Validates an image file.
+
+    Args:
+        path (str): The path to the image file.
+        img_size (int, optional): The size of the image. Default is 225.
+    Returns:
+        bool: True if the image is successfully opened and resized,
+        False otherwise.
+    """
     try:
         image = Image.open(path)
         image = image.resize((img_size, img_size))
+
         return True
     except:
         return False
 
 
 class MushroomDataModule(LightningDataModule):
-    def __init__(self, batch_size=128, img_size=224):
+    """
+    LightningDataModule subclass for handling Mushroom dataset.
+
+    Args:
+        batch_size (int): The batch size for data loaders. Default is 128.
+        img_size (int): The size of the input images. Default is 224.
+    """
+
+    def __init__(self, batch_size: int = 128, img_size: int = 224):
+        """
+        MushroomDataModule constructor.
+
+        Args:
+            batch_size (int): Batch size for DataLoader.
+            img_size (int): Size of the input images.
+        """
         super().__init__()
         self.img_size = img_size
         self.batch_size = batch_size
@@ -39,13 +67,22 @@ class MushroomDataModule(LightningDataModule):
             [
                 transforms.Resize((img_size, img_size)),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                ),
             ]
         )
 
-    def setup(self, stage=None):
+    def setup(self, stage: Optional[str] = None):
+        """
+        Set up the Mushroom dataset.
+
+        Args:
+            stage (str, optional): The stage of setup. Default is None.
+        """
+        BASE_DIR = os.getcwd()
         dataset = datasets.ImageFolder(
-            root="/home/gediminas/Documents/turing_projects/module4_s1/gskvar-DL.1.5/Mushrooms",
+            root=f"{BASE_DIR}/Mushrooms",
             transform=self.transform,
             is_valid_file=lambda path: image_val(
                 path=path,
@@ -72,21 +109,39 @@ class MushroomDataModule(LightningDataModule):
         self.valid_set = Subset(dataset, valid_idx)
         self.test_set = Subset(dataset, test_idx)
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> DataLoader:
+        """
+        Returns a data loader for training set.
+
+        Returns:
+            torch.utils.data.DataLoader: Data loader for training set.
+        """
         return DataLoader(
             self.train_set,
             batch_size=self.batch_size,
             num_workers=5,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> DataLoader:
+        """
+        Returns a data loader for validation set.
+
+        Returns:
+            torch.utils.data.DataLoader: Data loader for validation set.
+        """
         return DataLoader(
             self.valid_set,
             batch_size=self.batch_size,
             num_workers=5,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> DataLoader:
+        """
+        Returns a data loader for test set.
+
+        Returns:
+            torch.utils.data.DataLoader: Data loader for test set.
+        """
         return DataLoader(
             self.test_set,
             batch_size=self.batch_size,
@@ -97,12 +152,25 @@ class MushroomDataModule(LightningDataModule):
 class MushroomClassifier(LightningModule):
     def __init__(
         self,
-        num_classes=9,
-        learning_rate=1e-3,
-        architecture="resnet18",
-        optimizer="adam",
-        l2=0,
-    ):
+        num_classes: int = 9,
+        learning_rate: float = 1e-3,
+        architecture: str = "resnet18",
+        optimizer: str = "adam",
+        l2: float = 0,
+    ) -> None:
+        """
+        Initializes the MushroomClassifier.
+
+        Args:
+            num_classes (int): The number of classes in the dataset.
+                Default is 9.
+            learning_rate (float): The learning rate for the optimizer.
+                Default is 1e-3.
+            architecture (str): The architecture of the model.
+                Default is "resnet18".
+            optimizer (str): The optimizer to use. Default is "adam".
+            l2 (float): The L2 regularization strength. Default is 0.
+        """
         super().__init__()
 
         # Load pre-trained architecture
@@ -124,33 +192,74 @@ class MushroomClassifier(LightningModule):
         # Set other hyperparameters
         self.learning_rate = learning_rate
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass of the model.
+
+        Args:
+            x (torch.Tensor): The input tensor.
+
+        Returns:
+            torch.Tensor: The output tensor.
+        """
         return self.model(x)
 
-    def training_step(self, batch, batch_idx):
+    def training_step(
+        self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
+        """
+        Training step of the model.
+
+        Args:
+            batch (Tuple[torch.Tensor, torch.Tensor]): The input batch.
+            batch_idx (int): The index of the batch.
+
+        Returns:
+            torch.Tensor: The loss tensor.
+        """
         inputs, labels = batch
         outputs = self(inputs)
         loss = cross_entropy(outputs, labels)
-        self.logger.experiment.add_scalars(
-            "loss",
-            {"train": loss},
-            self.global_step,
-        )
+        if self.logger:
+            self.logger.experiment.add_scalars(
+                "loss",
+                {"train": loss},
+                self.global_step,
+            )
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(
+        self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
+        """
+        Validation step of the model.
+
+        Args:
+            batch (Tuple[torch.Tensor, torch.Tensor]): The input batch.
+            batch_idx (int): The index of the batch.
+
+        Returns:
+            torch.Tensor: The loss tensor.
+        """
         inputs, labels = batch
         outputs = self(inputs)
         loss = cross_entropy(outputs, labels)
-        self.logger.experiment.add_scalars(
-            "loss",
-            {"val": loss},
-            self.global_step,
-        )
+        if self.logger:
+            self.logger.experiment.add_scalars(
+                "loss",
+                {"val": loss},
+                self.global_step,
+            )
         self.log("val_loss", loss, on_epoch=True)
         return loss
 
-    def configure_optimizers(self):
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        """
+        Configures the optimizer.
+
+        Returns:
+            torch.optim.Optimizer: The optimizer.
+        """
         optimizers = {
             "adam": Adam(
                 self.parameters(),
@@ -166,7 +275,19 @@ class MushroomClassifier(LightningModule):
         optimizer = optimizers[self.optimizer]
         return optimizer
 
-    def test_step(self, batch, batch_idx):
+    def test_step(
+        self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
+        """
+        Test step of the model.
+
+        Args:
+            batch (Tuple[torch.Tensor, torch.Tensor]): The input batch.
+            batch_idx (int): The index of the batch.
+
+        Returns:
+            torch.Tensor: The loss tensor.
+        """
         inputs, labels = batch
         outputs = self(inputs)
         loss = cross_entropy(outputs, labels)
@@ -184,6 +305,22 @@ class MushroomClassifier(LightningModule):
         self.log("test_weighted_f1_score", f1)
         return loss
 
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+    def predict_step(
+        self,
+        batch: Tuple[torch.Tensor, torch.Tensor],
+        batch_idx: int,
+        dataloader_idx: int = 0,
+    ) -> torch.Tensor:
+        """
+        Predict step of the model.
+
+        Args:
+            batch (Tuple[torch.Tensor, torch.Tensor]): The input batch.
+            batch_idx (int): The index of the batch.
+            dataloader_idx (int): The index of the dataloader. Default is 0.
+
+        Returns:
+            torch.Tensor: The output tensor.
+        """
         inputs, labels = batch
         return self(inputs)
