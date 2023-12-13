@@ -7,9 +7,10 @@ from torchvision.models import (  # type: ignore
     GoogLeNet_Weights,
 )  # type: ignore
 from torch.nn.functional import cross_entropy
-from torch.nn import Linear
+from torch.nn import Linear, Sequential
 from torch.optim import Adam, SGD
 from pytorch_lightning import LightningModule, LightningDataModule
+from pytorch_lightning.callbacks import BaseFinetuning
 import torch
 from PIL import Image  # type: ignore
 from torchvision import datasets, transforms  # type: ignore
@@ -52,7 +53,9 @@ class MushroomDataModule(LightningDataModule):
         img_size (int): The size of the input images. Default is 224.
     """
 
-    def __init__(self, batch_size: int = 128, img_size: int = 224):
+    def __init__(
+        self, batch_size: int = 128, img_size: int = 224, base_dir: str = None
+    ):
         """
         MushroomDataModule constructor.
 
@@ -65,13 +68,20 @@ class MushroomDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.transform = transforms.Compose(
             [
-                transforms.Resize((img_size, img_size)),
+                transforms.Resize((256, 256)),
+                transforms.CenterCrop(img_size),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(degrees=15),
                 transforms.ToTensor(),
                 transforms.Normalize(
                     mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
                 ),
             ]
         )
+        if base_dir == None:
+            self.BASE_DIR = os.getcwd()
+        else:
+            self.BASE_DIR = base_dir
 
     def setup(self, stage: Optional[str] = None):
         """
@@ -80,9 +90,8 @@ class MushroomDataModule(LightningDataModule):
         Args:
             stage (str, optional): The stage of setup. Default is None.
         """
-        BASE_DIR = os.getcwd()
         dataset = datasets.ImageFolder(
-            root=f"{BASE_DIR}/Mushrooms",
+            root=f"{self.BASE_DIR}/Mushrooms",
             transform=self.transform,
             is_valid_file=lambda path: image_val(
                 path=path,
@@ -179,18 +188,20 @@ class MushroomClassifier(LightningModule):
             "squeezenet": squeezenet1_0(weights=SqueezeNet1_0_Weights.DEFAULT),
             "google": googlenet(weights=GoogLeNet_Weights.DEFAULT),
         }
-        self.model = models[architecture]
-        self.optimizer = optimizer
+        backbone = models[architecture]
         self.num_classes = num_classes
-        self.l2 = l2
-        # Modify the classifier to match the number of classes in your dataset
+        # backbone number of features
         if architecture == "squeezenet":
-            in_features = self.model.classifier[1].in_channels
+            in_features = backbone.classifier[1].in_channels
         else:
-            in_features = self.model.fc.in_features
-        self.model.fc = Linear(in_features, num_classes)
-        # Set other hyperparameters
+            in_features = backbone.fc.in_features
+        layers = list(backbone.children())[:-1]
+        self.feature_extractor = Sequential(*layers)
+        self.model = Linear(in_features, num_classes)
+        # Set other hyperparameters and optimizer
         self.learning_rate = learning_rate
+        self.l2 = l2
+        self.optimizer = optimizer
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -202,7 +213,10 @@ class MushroomClassifier(LightningModule):
         Returns:
             torch.Tensor: The output tensor.
         """
-        return self.model(x)
+        x = self.feature_extractor(x)
+        x = x.view(x.size(0), -1)
+        x = self.model(x)
+        return x
 
     def training_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
@@ -261,19 +275,25 @@ class MushroomClassifier(LightningModule):
             torch.optim.Optimizer: The optimizer.
         """
         optimizers = {
-            "adam": Adam(
-                self.parameters(),
-                lr=self.learning_rate,
-                weight_decay=self.l2,
-            ),
-            "sgd": SGD(
-                self.parameters(),
-                lr=self.learning_rate,
-                weight_decay=self.l2,
-            ),
+            "adam": Adam,
+            "sgd": SGD
+            # "adam": Adam(
+            #     self.parameters(),
+            #     lr=self.learning_rate,
+            #     weight_decay=self.l2,
+            # ),
+            # "sgd": SGD(
+            #     self.parameters(),
+            #     lr=self.learning_rate,
+            #     weight_decay=self.l2,
+            # ),
         }
         optimizer = optimizers[self.optimizer]
-        return optimizer
+        return optimizer(
+            filter(lambda p: p.requires_grad, self.parameters()),
+            lr=self.learning_rate,
+            weight_decay=self.l2,
+        )
 
     def test_step(
         self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
@@ -324,3 +344,22 @@ class MushroomClassifier(LightningModule):
         """
         inputs, labels = batch
         return self(inputs)
+
+
+class MushroomTuner(BaseFinetuning):
+    def __init__(self, unfreeze_at_epoch=5, tuning_lr=1e-5):
+        super().__init__()
+        self._unfreeze_at_epoch = unfreeze_at_epoch
+        self.tuning_lr = tuning_lr
+
+    def freeze_before_training(self, pl_module):
+        self.freeze(pl_module.feature_extractor, train_bn=False)
+
+    def finetune_function(self, pl_module, current_epoch, optimizer):
+        if current_epoch == self._unfreeze_at_epoch:
+            self.unfreeze_and_add_param_group(
+                modules=pl_module.feature_extractor,
+                optimizer=optimizer,
+                lr=self.tuning_lr,
+                train_bn=True,
+            )

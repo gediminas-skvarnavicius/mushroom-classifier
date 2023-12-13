@@ -1,29 +1,32 @@
 from pytorch_lightning import LightningModule, Trainer, LightningDataModule
-from pytorch_lightning.loggers import Logger
 from typing import Type, Optional, List, Tuple
 import numpy as np
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.callbacks import Callback
 from ray import tune
-from .model import MushroomClassifier, MushroomDataModule
+from .model import MushroomClassifier, MushroomDataModule, MushroomTuner
+from pytorch_lightning.loggers import Logger
 
 
-def config_models(
+def config_trainer_model_dm(
     config: dict,
     model: Type[MushroomDataModule],
     dm: Type[MushroomClassifier],
-) -> Tuple[MushroomDataModule, MushroomClassifier]:
+    logger: Optional[Logger] = None,
+) -> Tuple[Trainer, MushroomClassifier, MushroomDataModule]:
     """
-    Configure and initialize a model and data module based on the provided
+    Configure and initialize a model, data module, and trainer based on the provided
     configuration.
 
     Parameters:
     - config (dict): A dictionary containing configuration parameters.
     - model (Type[MushroomDataModule]): The class type for the model.
     - dm (Type[MushroomClassifier]): The class type for the data module.
+    - logger: Optional logger for logging training information.
 
     Returns:
-    Tuple[MushroomDataModule, MushroomClassifier]: A tuple containing the
-    initialized model and data module.
+    Tuple[Trainer, MushroomClassifier, MushroomDataModule]: A tuple containing the
+    initialized trainer, model, and data module.
     """
     model_instance = model(
         num_classes=config["num_classes"],
@@ -32,8 +35,26 @@ def config_models(
         optimizer=config["optimizer"],
         l2=config["l2"],
     )
-    dm_instance = dm(batch_size=config["batch_size"], img_size=config["img_size"])
-    return model_instance, dm_instance
+    dm_instance = dm(
+        batch_size=config["batch_size"],
+        img_size=config["img_size"],
+        base_dir=config["base_dir"],
+    )
+
+    callbacks = []
+    # early stopping
+    if config["early_stopping_params"] != None:
+        callbacks.append(EarlyStopping(**config["early_stopping_params"]))
+    # Fine Tuning
+    if config["fine_tuning_params"] != None:
+        callbacks.append(MushroomTuner(**config["fine_tuning_params"]))
+    trainer_instance = Trainer(
+        max_epochs=config["max_epochs"],
+        accelerator="gpu",
+        callbacks=callbacks,
+        logger=logger,
+    )
+    return trainer_instance, model_instance, dm_instance
 
 
 class TrainableP2L(tune.Trainable):
@@ -71,7 +92,6 @@ class TrainableP2L(tune.Trainable):
         dm: Type[LightningDataModule],
         metric: str = "val_loss",
         logger: Optional[Logger] = None,
-        callbacks: Optional[List[EarlyStopping]] = None,
     ):
         """
         Set up the trainable object with hyperparameters and data.
@@ -88,25 +108,17 @@ class TrainableP2L(tune.Trainable):
 
         self.x = 0
         self.config = config
-        self.model = model(
-            num_classes=config["num_classes"],
-            learning_rate=config["learning_rate"],
-            architecture=config["architecture"],
-            optimizer=config["optimizer"],
-            l2=config["l2"],
-        )
-        self.dm = dm(
-            batch_size=config["batch_size"],
-            img_size=config["img_size"],
+        self.trainer, self.model, self.dm = config_trainer_model_dm(
+            config, model, dm, logger=logger
         )
         self.metric = metric
         self.scores = np.array([])
-        self.trainer = Trainer(
-            max_epochs=config["max_epochs"],
-            accelerator="gpu",
-            callbacks=callbacks,
-            logger=logger,
-        )
+        # self.trainer = Trainer(
+        #     max_epochs=config["max_epochs"],
+        #     accelerator="gpu",
+        #     callbacks=callbacks,
+        #     logger=logger,
+        # )
 
     @staticmethod
     def objective(
