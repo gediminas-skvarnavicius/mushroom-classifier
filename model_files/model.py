@@ -5,8 +5,10 @@ from torchvision.models import (  # type: ignore
     SqueezeNet1_0_Weights,
     googlenet,
     GoogLeNet_Weights,
+    shufflenet_v2_x1_0,
+    ShuffleNet_V2_X1_0_Weights,
 )  # type: ignore
-from torch.nn.functional import cross_entropy
+from torch.nn.functional import cross_entropy, adaptive_avg_pool2d
 from torch.nn import Linear, Sequential
 from torch.optim import Adam, SGD
 from pytorch_lightning import LightningModule, LightningDataModule
@@ -187,6 +189,9 @@ class MushroomClassifier(LightningModule):
             "resnet18": resnet18(weights=ResNet18_Weights.DEFAULT),
             "squeezenet": squeezenet1_0(weights=SqueezeNet1_0_Weights.DEFAULT),
             "google": googlenet(weights=GoogLeNet_Weights.DEFAULT),
+            "shufflenet": shufflenet_v2_x1_0(
+                weights=ShuffleNet_V2_X1_0_Weights.DEFAULT
+            ),
         }
         backbone = models[architecture]
         self.num_classes = num_classes
@@ -214,7 +219,11 @@ class MushroomClassifier(LightningModule):
             torch.Tensor: The output tensor.
         """
         x = self.feature_extractor(x)
-        x = x.view(x.size(0), -1)
+        size1, size2 = x.shape[2], x.shape[3]
+        if size1 == 1 and size2 == 1:
+            x = x.view(x.size(0), -1)
+        else:
+            x = adaptive_avg_pool2d(x, (1, 1)).view(x.size(0), -1)
         x = self.model(x)
         return x
 
