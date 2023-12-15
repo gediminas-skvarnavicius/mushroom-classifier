@@ -283,20 +283,7 @@ class MushroomClassifier(LightningModule):
         Returns:
             torch.optim.Optimizer: The optimizer.
         """
-        optimizers = {
-            "adam": Adam,
-            "sgd": SGD
-            # "adam": Adam(
-            #     self.parameters(),
-            #     lr=self.learning_rate,
-            #     weight_decay=self.l2,
-            # ),
-            # "sgd": SGD(
-            #     self.parameters(),
-            #     lr=self.learning_rate,
-            #     weight_decay=self.l2,
-            # ),
-        }
+        optimizers = {"adam": Adam, "sgd": SGD}
         optimizer = optimizers[self.optimizer]
         return optimizer(
             filter(lambda p: p.requires_grad, self.parameters()),

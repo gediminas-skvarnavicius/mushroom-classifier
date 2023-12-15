@@ -15,8 +15,8 @@ def config_trainer_model_dm(
     logger: Optional[Logger] = None,
 ) -> Tuple[Trainer, MushroomClassifier, MushroomDataModule]:
     """
-    Configure and initialize a model, data module, and trainer based on the provided
-    configuration.
+    Configure and initialize a model, data module, and trainer based on the
+    provided configuration.
 
     Parameters:
     - config (dict): A dictionary containing configuration parameters.
@@ -25,8 +25,8 @@ def config_trainer_model_dm(
     - logger: Optional logger for logging training information.
 
     Returns:
-    Tuple[Trainer, MushroomClassifier, MushroomDataModule]: A tuple containing the
-    initialized trainer, model, and data module.
+    Tuple[Trainer, MushroomClassifier, MushroomDataModule]: A tuple containing
+    the initialized trainer, model, and data module.
     """
     model_instance = model(
         num_classes=config["num_classes"],
@@ -73,8 +73,6 @@ class TrainableP2L(tune.Trainable):
     - dm: The PyTorch Lightning DataModule for handling data.
     - metric (str): The metric used for evaluation.
     - logger (Optional[Logger]): An optional logger for experiment logging.
-    - callbacks (Optional[List[EarlyStopping]]): Optional list of early
-    stopping callbacks.
 
     Methods:
     - setup(config, model, dm, metric, logger, callbacks):
@@ -101,9 +99,8 @@ class TrainableP2L(tune.Trainable):
         model: The PyTorch Lightning model.
         dm: The PyTorch Lightning DataModule.
         metric (str, optional): The metric used for scoring.
-
-        logger (Optional[Logger], optional): An optional logger for experiment logging.
-        callbacks (Optional[List[EarlyStopping]], optional): Optional list of early stopping callbacks.
+        logger (Optional[Logger], optional): An optional logger for
+        experiment logging.
         """
 
         self.x = 0
@@ -113,12 +110,6 @@ class TrainableP2L(tune.Trainable):
         )
         self.metric = metric
         self.scores = np.array([])
-        # self.trainer = Trainer(
-        #     max_epochs=config["max_epochs"],
-        #     accelerator="gpu",
-        #     callbacks=callbacks,
-        #     logger=logger,
-        # )
 
     @staticmethod
     def objective(
@@ -131,15 +122,12 @@ class TrainableP2L(tune.Trainable):
         Objective function for hyperparameter tuning.
 
         Parameters:
-        - pipeline (Pipeline): The machine learning pipeline to be evaluated.
-        - params (dict): Hyperparameter configuration for the pipeline.
-        - X_train (pl.DataFrame): Training data features as a Polars DataFrame.
-        - y_train (pl.Series): Training data labels as a Polars Series.
-        - X_val (pl.DataFrame): Validation data features as a Polars DataFrame.
-        - y_val (pl.Series): Validation data labels as a Polars Series.
-        - n (int): The current iteration number.
-        - metric (str, optional): The metric for scoring. Supported metrics:
-        "roc_auc", "f1", "rmse".
+        - trainer (Trainer): The Lightning Trainer for training the model.
+        - model (Type[LightningModule]): The LightningModule representing
+        the machine learning model.
+        - dm (Type[LightningDataModule]): The LightningDataModule
+        containing the data for training and validation.
+        - metric (str, optional): Name of the metric.
 
         Returns:
         - float: The score based on the specified metric.
