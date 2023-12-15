@@ -1,8 +1,7 @@
 from pytorch_lightning import LightningModule, Trainer, LightningDataModule
-from typing import Type, Optional, List, Tuple
+from typing import Type, Optional, Tuple
 import numpy as np
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
-from pytorch_lightning.callbacks import Callback
 from ray import tune
 from .model import MushroomClassifier, MushroomDataModule, MushroomTuner
 from pytorch_lightning.loggers import Logger
