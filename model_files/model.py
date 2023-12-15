@@ -326,7 +326,6 @@ class MushroomClassifier(LightningModule):
             average="weighted",
             num_classes=9,
         )
-        # Log any additional metrics you are interested in
         acc = (torch.argmax(outputs, dim=1) == labels).float().mean()
 
         self.log("test_loss", loss)
@@ -351,8 +350,26 @@ class MushroomClassifier(LightningModule):
         Returns:
             torch.Tensor: The output tensor.
         """
+        self.eval()
         inputs, labels = batch
         return self(inputs)
+
+    def predict_image(self, image: str) -> torch.Tensor:
+        """
+        Predicts the class probabilities for a single image.
+
+        Args:
+            image_path (str): The path to the image file.
+
+        Returns:
+            torch.Tensor: The predicted class probabilities.
+        """
+
+        self.eval()  # Set the model to evaluation mode
+        with torch.no_grad():
+            predictions = torch.softmax(self(image), dim=1)
+
+        return predictions.squeeze(0)
 
 
 class MushroomTuner(BaseFinetuning):
